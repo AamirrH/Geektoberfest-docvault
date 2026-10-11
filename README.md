@@ -24,6 +24,7 @@ The frontend is deployed on Vercel, and the FastAPI backend is hosted on Render.
 - Download documents
 - Delete documents
 - Create and delete folders
+- Rename folders with validation that preserves your input on errors
 - Search documents by filename
 - Browse documents in pages of 10, with search and folder filters
 
@@ -88,20 +89,35 @@ The React application will be available at `http://localhost:5173`.
 
 The document list shows 10 documents per page, newest first. Use **Previous** and
 **Next** below the table; the current page, matching document count, and page size
-are displayed alongside them. Search and folder changes reset to page 1. Deleting
+are displayed alongside them. Search, folder, and file-type changes reset to page 1. Deleting
 the last item on a page returns you to the last available page. Empty results show
-"No documents found" and disable both navigation buttons.
+helpful empty-state guidance and disable both navigation buttons.
 
 The frontend uses `GET /documents/page` with `page` (default 1), `page_size`
-(default 10, maximum 100), optional `q`, and optional `folder_id`. The authenticated
+(default 10, maximum 100), and optional `q`, `folder_id`, and `file_type`. The authenticated
 response contains `items`, `total`, `page`, `page_size`, and `total_pages`. Ownership,
-search, and folder filters are applied before counting and pagination. Results are
+search, folder, and file-type filters are applied before counting and pagination. Results are
 ordered by creation time descending, then ID descending to break ties. Pages past
 the end are clamped to the last available page; zero results return page 1 of 1
 with an empty `items` array. Invalid page or page-size values return `422`.
 
 The existing `/documents/` and `/documents/search` endpoints keep their array
 responses for compatibility.
+
+## Folder names
+
+Folder creation and renaming trim leading and trailing whitespace and reject empty
+or whitespace-only names. Names must be unique for each user (case-sensitive).
+Folders are currently a flat list, so there is no parent-folder scope. Different
+users can use the same folder name.
+
+Use the pencil button beside a folder to rename it, then choose **Save** or
+**Cancel**. Validation errors appear beside the input without clearing your text.
+Renaming keeps the folder's documents and current selection unchanged.
+
+The API accepts `PATCH /folders/{folder_id}` with `{"name": "New name"}` and requires
+authentication as the folder owner. Invalid names return `422`, duplicate names
+return `400`, and missing folders or folders owned by another user return `404`.
 
 ## Running tests
 
@@ -112,8 +128,10 @@ pip install -r requirements-dev.txt
 python -m unittest discover -s tests -v
 ```
 
-Backend tests use an isolated in-memory SQLite database without modifying your
-development database. From `frontend`:
+Backend tests use an isolated in-memory SQLite database and do not require a
+running PostgreSQL instance or modify your development database.
+
+From `frontend`:
 
 ```bash
 npm install

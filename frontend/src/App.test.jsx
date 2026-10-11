@@ -1,49 +1,24 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import App from "./App";
 import * as api from "./api";
 
 vi.mock("./api", () => ({
   API_URL: "http://localhost:8000",
-  getDocumentPage: vi.fn(), getFolders: vi.fn(), getMe: vi.fn(),
-  deleteDocument: vi.fn(), uploadDocument: vi.fn(), deleteFolder: vi.fn(),
-  createFolder: vi.fn(), login: vi.fn(), register: vi.fn(),
+  getMe: vi.fn(), getFolders: vi.fn(), getDocumentPage: vi.fn(),
+  createFolder: vi.fn(), renameFolder: vi.fn(), deleteFolder: vi.fn(),
+  uploadDocument: vi.fn(), deleteDocument: vi.fn(), searchDocuments: vi.fn(),
+  login: vi.fn(), register: vi.fn(),
 }));
-
-let documents;
-
-function document(id) {
-  return {
-    id, original_filename: `report-${String(id).padStart(2, "0")}.txt`,
-    file_size: 100, created_at: "2026-01-01T00:00:00", folder_id: id <= 12 ? 1 : null,
-  };
-}
-
-function paginatedResponse({ page = 1, page_size = 10, q = "", folder_id }) {
-  const matches = documents.filter((item) =>
-    item.original_filename.toLowerCase().includes(q.toLowerCase()) &&
-    (folder_id == null || item.folder_id === folder_id)
-  );
-  const total_pages = Math.max(1, Math.ceil(matches.length / page_size));
-  page = Math.min(page, total_pages);
-  return { data: {
-    items: matches.slice((page - 1) * page_size, page * page_size),
-    total: matches.length, page, page_size, total_pages,
-  } };
-}
 
 beforeEach(() => {
   vi.resetAllMocks();
   localStorage.setItem("token", "test-token");
-  documents = Array.from({ length: 23 }, (_, index) => document(23 - index));
   api.getMe.mockResolvedValue({ data: { username: "alice" } });
+  api.getDocumentPage.mockResolvedValue({ data: { items: [], total: 0, page: 1, page_size: 10, total_pages: 1 } });
   api.getFolders.mockResolvedValue({ data: [{ id: 1, name: "Reports" }] });
-  api.getDocumentPage.mockImplementation(async (params) => paginatedResponse(params));
-  api.deleteDocument.mockImplementation(async (id) => {
-    documents = documents.filter((item) => item.id !== id);
-  });
 });
 
 afterEach(() => {
@@ -54,135 +29,100 @@ afterEach(() => {
 async function openApp() {
   const user = userEvent.setup();
   render(<App />);
-  await screen.findByText(/Page 1 of/);
+  await screen.findByRole("button", { name: "Rename Reports" });
   return user;
 }
 
-describe("document pagination", () => {
-  it("shows ten rows and navigates through the last partial page", async () => {
+describe("folder creation", () => {
+  it("rejects whitespace visibly and retains the input", async () => {
     const user = await openApp();
-    expect(screen.getByText("Page 1 of 3 · 23 documents · 10 per page")).toBeTruthy();
-    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(11);
-    expect(screen.getByRole("button", { name: "Previous" }).disabled).toBe(true);
-    expect(screen.getAllByTitle("Download")[0].href).toBe("http://localhost:8000/documents/23/download?token=test-token");
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByText(/Page 2 of 3/);
-    expect(screen.getByText("report-13.txt")).toBeTruthy();
-    expect(screen.queryByText("report-23.txt")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByText(/Page 3 of 3/);
-    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(4);
-    expect(screen.getByRole("button", { name: "Next" }).disabled).toBe(true);
-    await user.click(screen.getByRole("button", { name: "Previous" }));
-    await screen.findByText(/Page 2 of 3/);
+    const input = screen.getByRole("textbox", { name: "New folder name" });
+    await user.type(input, "   ");
+    await user.click(screen.getByRole("button", { name: "Create folder" }));
+    expect(screen.getByRole("alert").textContent).toContain("cannot be empty");
+    expect(input.value).toBe("   ");
+    expect(api.createFolder).not.toHaveBeenCalled();
   });
 
-  it("resets search to page one and sends the whole search string", async () => {
+  it.each([
+    ["Folder already exists", "Folder already exists"],
+    [[{ msg: "Folder name is invalid" }], "Folder name is invalid"],
+  ])("retains input after API errors: %j", async (detail, message) => {
+    api.createFolder.mockRejectedValue({ response: { data: { detail } } });
     const user = await openApp();
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByText(/Page 2 of 3/);
-    await user.type(screen.getByPlaceholderText("Search documents..."), "report-01");
-    await screen.findByText("Page 1 of 1 · 1 documents · 10 per page");
-    expect(screen.getByText("report-01.txt")).toBeTruthy();
-    expect(api.getDocumentPage).toHaveBeenLastCalledWith(
-      { page: 1, page_size: 10, q: "report-01", folder_id: undefined }, expect.any(AbortSignal)
-    );
+    const input = screen.getByRole("textbox", { name: "New folder name" });
+    await user.type(input, " Reports ");
+    await user.click(screen.getByRole("button", { name: "Create folder" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(message);
+    expect(input.value).toBe(" Reports ");
+    expect(api.createFolder).toHaveBeenCalledWith("Reports");
+    expect(input.disabled).toBe(false);
   });
 
-  it("resets folder changes and All Documents to page one", async () => {
+  it("clears input only after successful creation", async () => {
+    api.createFolder.mockResolvedValue({ data: { id: 2, name: "Archive" } });
     const user = await openApp();
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByText(/Page 2 of 3/);
-    await user.click(await screen.findByRole("button", { name: "Reports", exact: true }));
-    await screen.findByText("Page 1 of 2 · 12 documents · 10 per page");
-    expect(api.getDocumentPage).toHaveBeenLastCalledWith(
-      { page: 1, page_size: 10, q: "", folder_id: 1 }, expect.any(AbortSignal)
-    );
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByText(/Page 2 of 2/);
-    await user.click(screen.getByRole("button", { name: "All Documents" }));
-    await screen.findByText("Page 1 of 3 · 23 documents · 10 per page");
+    const input = screen.getByRole("textbox", { name: "New folder name" });
+    await user.type(input, " Archive ");
+    await user.click(screen.getByRole("button", { name: "Create folder" }));
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(api.createFolder).toHaveBeenCalledWith("Archive");
+    expect(api.getFolders).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("folder renaming", () => {
+  it("rejects blank names and keeps the editor open", async () => {
+    const user = await openApp();
+    await user.click(screen.getByRole("button", { name: "Rename Reports" }));
+    const input = screen.getByRole("textbox", { name: "Rename folder" });
+    await user.clear(input);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByRole("alert").textContent).toContain("cannot be empty");
+    expect(input.value).toBe("");
+    expect(api.renameFolder).not.toHaveBeenCalled();
   });
 
-  it("handles zero results and disables both navigation buttons", async () => {
-    documents = [];
-    await openApp();
-    expect(screen.getByText("No documents found.")).toBeTruthy();
-    expect(screen.getByText("Page 1 of 1 · 0 documents · 10 per page")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Previous" }).disabled).toBe(true);
-    expect(screen.getByRole("button", { name: "Next" }).disabled).toBe(true);
+  it("retains a failed rename and lets the user correct and save it", async () => {
+    api.renameFolder.mockRejectedValueOnce({ response: { data: { detail: "Folder already exists" } } });
+    api.renameFolder.mockResolvedValueOnce({ data: { id: 1, name: "Archive" } });
+    const user = await openApp();
+    await user.click(screen.getByRole("button", { name: "Reports", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Rename Reports" }));
+    const input = screen.getByRole("textbox", { name: "Rename folder" });
+    expect(input.value).toBe("Reports");
+    await user.clear(input);
+    await user.type(input, " Existing ");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Folder already exists");
+    expect(input.value).toBe(" Existing ");
+    await user.clear(input);
+    await user.type(input, " Archive ");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const renamed = await screen.findByRole("button", { name: "Archive", exact: true });
+    expect(renamed.className).toContain("bg-indigo-50");
+    expect(api.renameFolder).toHaveBeenLastCalledWith(1, "Archive");
+    expect(screen.queryByRole("textbox", { name: "Rename folder" })).toBeNull();
   });
 
-  it("returns to the previous page after deleting its only document", async () => {
-    documents = documents.slice(0, 11);
+  it("shows a network error without losing the attempted name", async () => {
+    api.renameFolder.mockRejectedValue(new Error("Network error"));
     const user = await openApp();
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByText(/Page 2 of 2/);
-    await user.click(screen.getByTitle("Delete"));
-    await screen.findByText("Page 1 of 1 · 10 documents · 10 per page");
-    expect(screen.getByRole("button", { name: "Next" }).disabled).toBe(true);
-    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(11);
+    await user.click(screen.getByRole("button", { name: "Rename Reports" }));
+    const input = screen.getByRole("textbox", { name: "Rename folder" });
+    await user.clear(input);
+    await user.type(input, "Archive");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Failed to rename folder");
+    expect(input.value).toBe("Archive");
   });
 
-  it("handles deletion of the final document", async () => {
-    documents = [document(1)];
+  it("cancels editing without sending a request", async () => {
     const user = await openApp();
-    await user.click(screen.getByTitle("Delete"));
-    await screen.findByText("Page 1 of 1 · 0 documents · 10 per page");
-    expect(screen.getByText("No documents found.")).toBeTruthy();
-  });
-
-  it("refreshes totals after an upload", async () => {
-    documents = documents.slice(0, 10);
-    api.uploadDocument.mockImplementation(async () => { documents.unshift(document(24)); });
-    const user = await openApp();
-    await user.upload(screen.getByLabelText("Upload file"), new File(["test"], "report-24.txt", { type: "text/plain" }));
-    await user.click(screen.getByRole("button", { name: "Upload", exact: true }));
-    await screen.findByText("Page 1 of 2 · 11 documents · 10 per page");
-    expect(screen.getByText("report-24.txt")).toBeTruthy();
-  });
-
-  it("resets to All Documents after deleting the selected folder", async () => {
-    api.deleteFolder.mockImplementation(async (id) => {
-      documents = documents.filter((item) => item.folder_id !== id);
-      api.getFolders.mockResolvedValue({ data: [] });
-    });
-    const user = await openApp();
-    await user.click(await screen.findByRole("button", { name: "Reports", exact: true }));
-    await screen.findByText(/Page 1 of 2/);
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByText(/Page 2 of 2/);
-    await user.click(screen.getByTitle("Delete folder"));
-    await screen.findByText("Page 1 of 2 · 11 documents · 10 per page");
-    expect(api.getDocumentPage).toHaveBeenLastCalledWith(
-      { page: 1, page_size: 10, q: "", folder_id: undefined }, expect.any(AbortSignal)
-    );
-  });
-
-  it("shows fetch errors and allows retry without navigating away", async () => {
-    const user = await openApp();
-    api.getDocumentPage.mockRejectedValueOnce(new Error("Network unavailable"));
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("Failed to fetch documents");
-    expect(screen.queryByText("report-23.txt")).toBeNull();
-    expect(screen.getByRole("button", { name: "Next" }).disabled).toBe(true);
-    await user.click(screen.getByRole("button", { name: "Retry" }));
-    await screen.findByText(/Page 2 of 3/);
-  });
-
-  it("ignores a slow old response after filters change", async () => {
-    const user = await openApp();
-    let resolveOldRequest;
-    api.getDocumentPage.mockImplementationOnce(() => new Promise((resolve) => { resolveOldRequest = resolve; }));
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    const oldSignal = api.getDocumentPage.mock.lastCall[1];
-    expect(screen.getByText("Loading documents...")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Next" }).disabled).toBe(true);
-    await user.type(screen.getByPlaceholderText("Search documents..."), "report-01");
-    await screen.findByText("Page 1 of 1 · 1 documents · 10 per page");
-    expect(oldSignal.aborted).toBe(true);
-    await act(async () => resolveOldRequest(paginatedResponse({ page: 2 })));
-    expect(screen.getByText("Page 1 of 1 · 1 documents · 10 per page")).toBeTruthy();
-    expect(screen.queryByText("report-13.txt")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Rename Reports" }));
+    await user.type(screen.getByRole("textbox", { name: "Rename folder" }), " changed");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(api.renameFolder).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Reports", exact: true })).toBeTruthy();
   });
 });

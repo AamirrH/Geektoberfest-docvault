@@ -67,6 +67,18 @@ class DocumentPaginationTests(unittest.TestCase):
         self.assertEqual(len(page["items"]), 10)
         self.assertEqual((page["page"], page["page_size"], page["total_pages"], page["total"]), (1, 10, 3, 23))
 
+    def test_file_type_combines_with_filters_before_counting_and_pagination(self):
+        self.db.query(models.Document).filter(models.Document.id >= 12).update({"content_type": "application/pdf"})
+        self.db.commit()
+        page = self.page(file_type="PDF", page=2)
+        self.assertEqual((page["total"], page["total_pages"], len(page["items"])), (12, 2, 2))
+        self.assertTrue(all(item["content_type"] == "application/pdf" for item in page["items"]))
+        page = self.page(file_type="pdf", folder_id=self.folder.id, q="report-11")
+        self.assertEqual(page["total"], 1)
+        self.assertEqual(page["items"][0]["id"], 12)
+        self.assertEqual(self.page(file_type="image")["total"], 0)
+        self.assertEqual(self.page(file_type="all")["total"], 23)
+
     def test_pages_have_stable_order_and_no_overlap_when_dates_match(self):
         ids = [item["id"] for number in (1, 2, 3) for item in self.page(page=number)["items"]]
         self.assertEqual(ids, list(range(23, 0, -1)))

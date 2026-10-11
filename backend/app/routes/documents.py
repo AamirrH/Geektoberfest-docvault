@@ -61,8 +61,16 @@ def upload_document(
     return new_doc
 
 @router.get("/", response_model=List[schemas.DocumentResponse])
-def get_documents(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
-    return db.query(models.Document).filter(models.Document.owner_id == current_user.id).all()
+def get_documents(db: Session = Depends(get_db),
+                  current_user: models.User = Depends(auth.get_current_user),
+                  file_type: Optional[str] = None
+                ):
+    query = db.query(models.Document).filter(models.Document.owner_id == current_user.id)
+
+    if file_type and file_type.lower() != "all":
+        query = query.filter(models.Document.content_type.ilike(f"%{file_type}%"))
+
+    return query.all()
 
 @router.get("/search", response_model=List[schemas.DocumentResponse])
 def search_documents(q: str, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
@@ -81,6 +89,7 @@ def get_document_page(
     page_size: int = Query(10, ge=1, le=100),
     q: str = "",
     folder_id: Optional[int] = Query(None, ge=1),
+    file_type: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user)
 ):
@@ -89,6 +98,8 @@ def get_document_page(
         query = query.filter(models.Document.original_filename.ilike(f"%{q}%"))
     if folder_id is not None:
         query = query.filter(models.Document.folder_id == folder_id)
+    if file_type and file_type.lower() != "all":
+        query = query.filter(models.Document.content_type.ilike(f"%{file_type}%"))
 
     total = query.count()
     total_pages = max(1, (total + page_size - 1) // page_size)
