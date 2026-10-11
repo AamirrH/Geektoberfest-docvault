@@ -30,7 +30,9 @@ export const register = (username, email, password) => api.post('/auth/register'
 export const getMe = () => api.get('/auth/me');
 
 // Document endpoints
-export const getDocuments = (q = '') => api.get(`/documents/?q=${q}`);
+export const getDocuments = (fileType = 'all') => api.get('/documents/', {
+  params: fileType === 'all' ? {} : { file_type: fileType },
+});
 export const uploadDocument = (formData) => api.post('/documents/upload', formData, {
   headers: {
     'Content-Type': 'multipart/form-data'
@@ -44,6 +46,7 @@ export const searchDocuments = (q) => api.get(`/documents/search?q=${q}`);
 // Folder endpoints
 export const getFolders = () => api.get('/folders/');
 export const createFolder = (name) => api.post('/folders/', { name });
+export const renameFolder = (id, name) => api.patch(`/folders/${id}`, { name });
 export const deleteFolder = (id) => api.delete(`/folders/${id}`);
 
 export default api;

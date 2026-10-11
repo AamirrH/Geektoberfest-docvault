@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -9,7 +9,7 @@ vi.mock("./api", () => ({
   API_URL: "http://localhost:8000", getDocuments: vi.fn(), getFolders: vi.fn(),
   getMe: vi.fn(), getDocumentVersions: vi.fn(), uploadDocumentVersion: vi.fn(),
   deleteDocument: vi.fn(), uploadDocument: vi.fn(), deleteFolder: vi.fn(),
-  createFolder: vi.fn(), searchDocuments: vi.fn(), login: vi.fn(), register: vi.fn(),
+  createFolder: vi.fn(), renameFolder: vi.fn(), searchDocuments: vi.fn(), login: vi.fn(), register: vi.fn(),
 }));
 
 let documents;
@@ -49,6 +49,26 @@ async function openHistory() {
 }
 
 describe("document version history", () => {
+  it("keeps file-type filtering and search working alongside history", async () => {
+    const user = await openHistory();
+    const pdf = { ...documents[0], id: 2, original_filename: "manual.pdf", content_type: "application/pdf" };
+    const text = { ...documents[0], content_type: "text/plain" };
+    api.getDocuments.mockResolvedValue({ data: [pdf] });
+    await user.selectOptions(screen.getByLabelText("Type:"), "pdf");
+    await screen.findByRole("button", { name: "Version history for manual.pdf" });
+    expect(api.getDocuments).toHaveBeenLastCalledWith("pdf");
+    expect(screen.queryByRole("button", { name: "Version history for report.txt" })).toBeNull();
+    expect(screen.getByText("Version 2 (current)")).toBeTruthy();
+
+    api.searchDocuments.mockResolvedValue({ data: [text] });
+    await user.type(screen.getByPlaceholderText("Search documents..."), "report");
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Version history for manual.pdf" })).toBeNull());
+    expect(screen.queryByRole("button", { name: "Version history for report.txt" })).toBeNull();
+    await user.selectOptions(screen.getByLabelText("Type:"), "all");
+    await screen.findByRole("button", { name: "Version history for report.txt" });
+    expect(api.searchDocuments).toHaveBeenLastCalledWith("report");
+  });
+
   it("opens history with timestamps, current indicator, and version download links", async () => {
     await openHistory();
     const list = screen.getByRole("list", { name: "Document versions" });

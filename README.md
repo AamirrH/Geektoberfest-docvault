@@ -25,6 +25,7 @@ The frontend is deployed on Vercel, and the FastAPI backend is hosted on Render.
 - Upload replacement versions and download earlier versions from document history
 - Delete documents
 - Create and delete folders
+- Rename folders with validation that preserves your input on errors
 - Search documents by filename
 
 ## Tech Stack
@@ -121,6 +122,21 @@ files; filesystem cleanup failures are logged for manual follow-up.
 Downgrading this migration removes version-history metadata while keeping the
 current document and file. Older files remain on disk, but their history links are
 lost; restoring a database backup is needed to recover that history.
+
+## Folder names
+
+Folder creation and renaming trim leading and trailing whitespace and reject empty
+or whitespace-only names. Names must be unique for each user (case-sensitive).
+Folders are currently a flat list, so there is no parent-folder scope. Different
+users can use the same folder name.
+
+Use the pencil button beside a folder to rename it, then choose **Save** or
+**Cancel**. Validation errors appear beside the input without clearing your text.
+Renaming keeps the folder's documents and current selection unchanged.
+
+The API accepts `PATCH /folders/{folder_id}` with `{"name": "New name"}` and requires
+authentication as the folder owner. Invalid names return `422`, duplicate names
+return `400`, and missing folders or folders owned by another user return `404`.
 
 ## Running tests
 

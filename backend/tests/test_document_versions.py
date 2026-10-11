@@ -113,6 +113,17 @@ class DocumentVersionTests(unittest.TestCase):
         self.assertEqual([v["version_number"] for v in self.versions(doc)], [4, 3, 2, 1])
         self.assertEqual(len(self.files()), 4)
 
+    def test_file_type_filter_uses_current_version_and_keeps_history(self):
+        doc = self.upload()
+        self.assertEqual(len(self.client.get("/documents/?file_type=text").json()), 1)
+        response = self.client.post(f"/documents/{doc['id']}/versions",
+                                    files={"file": ("report.pdf", b"pdf content", "application/pdf")})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.get("/documents/?file_type=text").json(), [])
+        self.assertEqual(self.client.get("/documents/?file_type=pdf").json()[0]["id"], doc["id"])
+        self.assertEqual(self.client.get(f"/documents/{doc['id']}/versions/1/download").content, b"first")
+        self.assertEqual(len(self.versions(doc)), 2)
+
     def test_separate_upload_with_same_name_keeps_distinct_identity(self):
         first, second = self.upload(), self.upload()
         self.assertNotEqual(first["id"], second["id"])
