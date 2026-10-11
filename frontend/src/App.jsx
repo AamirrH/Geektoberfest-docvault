@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
+import DocumentHistory from "./DocumentHistory";
 import {
+  API_URL,
   getDocuments,
   getFolders,
   uploadDocument,
@@ -42,6 +44,7 @@ function App() {
   const [newFolderName, setNewFolderName] = useState("");
   const [uploadFile, setUploadFile] = useState(null);
   const [error, setError] = useState("");
+  const [historyDocument, setHistoryDocument] = useState(null);
 
   useEffect(() => {
     if (token) {
@@ -112,6 +115,7 @@ function App() {
   };
 
   const handleLogout = () => {
+    setHistoryDocument(null);
     setToken(null);
   };
 
@@ -138,6 +142,7 @@ function App() {
   const handleDeleteDoc = async (id) => {
     try {
       await deleteDocument(id);
+      if (historyDocument?.id === id) setHistoryDocument(null);
       fetchDocuments();
     } catch (err) {
       console.error(err);
@@ -161,6 +166,7 @@ function App() {
   const handleDeleteFolder = async (id) => {
     try {
       await deleteFolder(id);
+      if (historyDocument?.folder_id === id) setHistoryDocument(null);
       if (selectedFolder === id) setSelectedFolder(null);
       fetchFolders();
       fetchDocuments();
@@ -343,6 +349,18 @@ function App() {
 
         {/* Main Content */}
         <div className="flex-1 overflow-hidden">
+          {historyDocument && (
+            <DocumentHistory
+              key={historyDocument.id}
+              document={historyDocument}
+              token={token}
+              onClose={() => setHistoryDocument(null)}
+              onUpdated={(updated) => {
+                setHistoryDocument((current) => current?.id === updated.id ? updated : current);
+                fetchDocuments();
+              }}
+            />
+          )}
           {error && (
             <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded shadow-sm flex justify-between">
               <p>{error}</p>
@@ -413,6 +431,13 @@ function App() {
                       </td>
                       <td className="p-4 text-right whitespace-nowrap">
                         <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => setHistoryDocument(doc)}
+                            className="text-sm text-indigo-600 hover:underline"
+                            aria-label={`Version history for ${doc.original_filename}`}
+                          >
+                            History
+                          </button>
                           <a
                             href={`${API_URL}/documents/${doc.id}/download?token=${token}`}
                             target="_blank"

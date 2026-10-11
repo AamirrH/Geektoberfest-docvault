@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://docvault-backend-iv5x.onrender.com';
+export const API_URL = import.meta.env.VITE_API_URL || 'https://docvault-backend-iv5x.onrender.com';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -37,6 +37,8 @@ export const uploadDocument = (formData) => api.post('/documents/upload', formDa
   }
 });
 export const deleteDocument = (id) => api.delete(`/documents/${id}`);
+export const getDocumentVersions = (id, signal) => api.get(`/documents/${id}/versions`, { signal });
+export const uploadDocumentVersion = (id, formData) => api.post(`/documents/${id}/versions`, formData);
 export const searchDocuments = (q) => api.get(`/documents/search?q=${q}`);
 
 // Folder endpoints
